@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PurchaseRequestStatus {
+  DRAFT
+  SENT_TO_MANAGEMENT
+  UNDER_REVIEW
+  REJECTED
+  RESUBMITTED
+  APPROVED
+  SENT_TO_FINANCE
+}
+
+enum ApprovalRole {
+  SUPERVISOR
+  CONTRACT_MANAGER
+}
+
+enum HistoryAction {
+  CREATED
+  UPDATED
+  SENT_TO_MANAGEMENT
+  REJECTED
+  RESUBMITTED
+  APPROVED
+  SENT_TO_FINANCE
+}
+
+model User {
+  id              String                    @id @default(cuid())
+  name            String
+  email           String                    @unique
+  passwordHash    String
+  status          UserStatus                @default(ACTIVE)
+  roleId          String
+  role            Role                      @relation(fields: [roleId], references: [id])
+  createdRequests PurchaseRequest[]         @relation("RequestCreator")
+  ownedRequests   PurchaseRequest[]         @relation("RequestBuyer")
+  approvals       PurchaseRequestApproval[]
+  historyEntries  PurchaseRequestHistory[]
+  sessions        Session[]
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@index([roleId])
+  @@index([status])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  name        String           @unique
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Company {
+  id        String            @id @default(cuid())
+  name      String
+  document  String?           @unique
+  active    Boolean           @default(true)
+  requests  PurchaseRequest[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+}
+
+model CostCenter {
+  id        String            @id @default(cuid())
+  code      String            @unique
+  name      String
+  active    Boolean           @default(true)
+  requests  PurchaseRequest[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+}
+
+model Supplier {
+  id        String            @id @default(cuid())
+  legalName String
+  tradeName String?
+  cnpj      String            @unique
+  phone     String?
+  email     String?
+  address   String?
+  city      String?
+  state     String?
+  notes     String?           @db.Text
+  active    Boolean           @default(true)
+  requests  PurchaseRequest[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  deletedAt DateTime?
+
+  @@index([legalName])
+  @@index([active])
+}
+
+model PurchaseRequest {
+  id            String                    @id @default(cuid())
+  number        Int                       @unique @default(autoincrement())
+  status        PurchaseRequestStatus     @default(DRAFT)
+  companyId     String
+  costCenterId  String
+  destination   String
+  requesterName String
+  buyerId       String
+  creatorId     String
+  supplierId    String?
+  totalAmount   Decimal                   @default(0) @db.Decimal(15, 2)
+  company       Company                   @relation(fields: [companyId], references: [id])
+  costCenter    CostCenter                @relation(fields: [costCenterId], references: [id])
+  buyer         User                      @relation("RequestBuyer", fields: [buyerId], references: [id])
+  creator       User                      @relation("RequestCreator", fields: [creatorId], references: [id])
+  supplier      Supplier?                 @relation(fields: [supplierId], references: [id])
+  items         PurchaseRequestItem[]
+  approvals     PurchaseRequestApproval[]
+  history       PurchaseRequestHistory[]
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  deletedAt     DateTime?
+
+  @@index([status])
+  @@index([buyerId])
+  @@index([supplierId])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model PurchaseRequestItem {
+  id          String          @id @default(cuid())
+  requestId   String
+  itemNumber  Int
+  unit        String
+  quantity    Decimal         @db.Decimal(15, 3)
+  description String          @db.VarChar(500)
+  unitPrice   Decimal         @db.Decimal(15, 2)
+  totalPrice  Decimal         @db.Decimal(15, 2)
+  request     PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, itemNumber])
+  @@index([requestId])
+}
+
+model PurchaseRequestApproval {
+  id        String          @id @default(cuid())
+  requestId String
+  userId    String
+  role      ApprovalRole
+  approved  Boolean         @default(true)
+  action    String
+  signedAt  DateTime        @default(now())
+  request   PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id])
+
+  @@unique([requestId, role])
+  @@index([userId])
+}
+
+model PurchaseRequestHistory {
+  id          String          @id @default(cuid())
+  requestId   String
+  userId      String
+  action      HistoryAction
+  description String          @db.VarChar(500)
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+  request     PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user        User            @relation(fields: [userId], references: [id])
+
+  @@index([requestId, createdAt])
+  @@index([userId])
+}
